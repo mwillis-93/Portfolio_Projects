@@ -1,0 +1,94 @@
+-- Standardize Date Format
+
+ALTER TABLE nash_housing
+ALTER COLUMN sale_date TYPE DATE USING sale_date::DATE
+
+---------------------------------------------------------------------------
+
+-- Populate Property Address data
+
+SELECT a.parcel_id, a.property_address AS a_property_address, 
+    b.parcel_id AS b_parcel_id, b.property_address AS b_property_address, 
+    COALESCE(a.property_address, b.property_address) AS filled_property_address
+FROM nash_housing a
+JOIN nash_housing b
+    ON a.parcel_id = b.parcel_id
+    AND a.unique_id <> b.unique_id
+WHERE a.property_address IS NULL;
+
+UPDATE nash_housing a
+SET property_address = COALESCE(a.property_address, b.property_address)
+FROM nash_housing b
+WHERE a.parcel_id = b.parcel_id
+  AND a.unique_id <> b.unique_id
+  AND a.property_address IS NULL
+
+---------------------------------------------------------------------------
+
+-- Breaking Address into Individual Columns (Address, City)
+
+ALTER TABLE nash_housing
+ADD COLUMN property_split_address TEXT,
+ADD COLUMN property_split_city TEXT
+
+UPDATE nash_housing
+SET 
+    property_split_address = SPLIT_PART(property_address, ',', 1),
+    property_split_city = SPLIT_PART(property_address, ',', 2)
+
+---------------------------------------------------------------------------
+
+-- Breaking Owner Address into Individual Columns (Address, City, State)
+
+ALTER TABLE nash_housing
+ADD COLUMN owner_split_address TEXT,
+ADD COLUMN owner_split_city TEXT,
+ADD COLUMN owner_split_state TEXT
+
+UPDATE nash_housing
+SET 
+    owner_split_address = SPLIT_PART(owner_address, ',', 1),
+    owner_split_city = SPLIT_PART(owner_address, ',', 2),
+	owner_split_state = SPLIT_PART(owner_address, ',', 3)
+
+
+---------------------------------------------------------------------------
+
+-- Changing Y and N to Yes and No in "sold_as_vacant" field
+
+UPDATE nash_housing
+SET sold_as_vacant = CASE WHEN sold_As_vacant = 'Y' THEN 'Yes'
+						   WHEN sold_as_vacant = 'N' THEN 'No'
+						   ELSE sold_as_vacant
+						   END
+
+---------------------------------------------------------------------------
+
+-- Remove Duplicates
+
+DELETE FROM nash_housing
+WHERE unique_id IN (
+    SELECT unique_id
+    FROM (
+        SELECT unique_id,
+               row_number() OVER (
+                   PARTITION BY parcel_id,
+                                property_address,
+                                sale_price,
+                                sale_date,
+                                legal_reference
+                   ORDER BY unique_id
+               ) AS row_num
+        FROM nash_housing
+    ) subquery
+    WHERE row_num > 1
+)
+
+---------------------------------------------------------------------------
+
+-- Delete Unsused Columns
+
+ALTER TABLE nash_housing
+DROP COLUMN tax_district,
+DROP COLUMN property_address,
+DROP COLUMN owner_address
